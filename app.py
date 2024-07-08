@@ -34,7 +34,7 @@ CNN = tf.keras.models.load_model(model_path)
 
 @app.route('/')
 def index():
-    return render_template("index.html")
+    return jsonify({'message': 'Hello World!'})
 
 #OBJECT DETECTION
 def objectDetection(path):

@@ -1,34 +1,23 @@
+import base64
 import os
-import joblib
 import numpy as np
 import math
-import matplotlib.pyplot as plt
 
 import tensorflow as tf
-from google.colab.patches import cv2_imshow
-from tensorflow.keras.preprocessing import image
 import cv2
 from ultralytics import YOLO
-
+from PIL import Image, ImageDraw
 from flask import Flask, request, jsonify
 from werkzeug.utils import secure_filename
 
-import module as md
-
 app = Flask(__name__)
-app.config['ALLOWED_EXTENSIONS'] = set(['png', 'jpg', 'jpeg'])
-app.config['UPLOAD_FOLDER'] = 'static/img/'
-
-
-def allowed_file(filename):
-    return '.' in filename and \
-        filename.rsplit('.', 1)[1] in app.config['ALLOWED_EXTENSIONS']
+app.config['API_KEY'] = 'oEfC3PglPKoCg1jDa833awsnTLoCxWSjbumTypmSEbNgWAincCp00DkcFEw45JznC6Cou73GrU07VieU01ktlsckPyqlWoSU75Bf'
 
 class_names = ['cataract', 'diabetic_retinopathy', 'glaucoma', 'normal']
 
 #Load Model
-object_detection = YOLO('/content/drive/MyDrive/Model_Fix/ImageDetection2.pt')
-model_path = '/content/drive/MyDrive/Model_Fix/optiguard_model_v1.h5'
+object_detection = YOLO('model/ImageDetection2.pt')
+model_path = 'model/optiguard_model_v1.h5'
 CNN = tf.keras.models.load_model(model_path)
 
 
@@ -37,17 +26,13 @@ def index():
     return jsonify({'message': 'Hello World!'})
 
 #OBJECT DETECTION
-def objectDetection(path):
+def objectDetection(image):
     detector = ObjectDetection()
-    detector.set_capture(path)
+    detector.set_capture(image)
 
     cropped_images = []
 
-    img = cv2.imread(path)
-    if img is None:
-        return cropped_images
-
-    results = detector.predict(img)
+    results = detector.predict(image)
 
     if len(results) > 0:
         r = results[0]
@@ -55,15 +40,15 @@ def objectDetection(path):
             box = r.boxes[0]
             x1, y1, x2, y2 = box.xyxy[0]
             x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
-            cropped_img = detector.crop_image(img, x1, y1, x2, y2)
+            cropped_img = detector.crop_image(image, x1, y1, x2, y2)
             cropped_images.append(cropped_img)
 
             # cv2_imshow(cropped_img)
 
-        img_with_boxes = detector.plot_boxes(results, img)
+        # img_with_boxes = detector.plot_boxes(results, img)
         # cv2_imshow(img_with_boxes)
 
-    cv2.destroyAllWindows()
+    # cv2.destroyAllWindows()
     return cropped_images
 
 class ObjectDetection:
@@ -138,7 +123,6 @@ def mask_ellipse(image):
 #KLASIFIKASI CNN
 import cv2
 import numpy as np
-import matplotlib.pyplot as plt
 
 def ConvolutionalNN(image):
     img = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
@@ -162,32 +146,38 @@ def ConvolutionalNN(image):
 
     return predicted_class
   
-@app.route('/predict', methods=['GET','POST'])
+@app.route('/predict', methods=['POST'])
 def predict():
-    if 'file' not in request.files:
-        return jsonify({'error': 'Format gambar salah'})
+    # Check for api key
+    api_key = request.headers.get('x-api-key')
+    if api_key != app.config['API_KEY']:
+        return jsonify({'error': 'API Key tidak valid'}), 401
     
-    file = request.files['file']
+    # Parse JSON request body
+    data = request.get_json()
+    if 'fundus_image' not in data:
+        return jsonify({'error': 'Fundus image tidak ditemukan'}), 400
 
-    if file.filename == '':
-        return jsonify({'error': 'File kosong'})
-
-    if file and allowed_file(file.filename):
-        filename = secure_filename(file.filename)
-        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-        file.save(filepath)
-
-        detected_images = objectDetection(filepath)
+    fundus_image = data['fundus_image']
+    
+    try:
+        # Decode base64 image blob
+        image_bytes = base64.b64decode(fundus_image)
+        np_arr = np.frombuffer(image_bytes, np.uint8)
+        image_np = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+                
+        detected_images = objectDetection(image_np)
         input_image = detected_images[0]
         input_image = Image.fromarray(cv2.cvtColor(input_image, cv2.COLOR_BGR2RGB))
         output_image = mask_ellipse(input_image)
         output_image = cv2.cvtColor(np.array(output_image), cv2.COLOR_RGB2BGR)
 
         predicted_class = ConvolutionalNN(output_image)
+        print(predicted_class)
 
-        return jsonify({'predicted_class': predicted_class})
-
-    return jsonify({'error': 'Terjadi kesalahan upload file'})
+        return jsonify({'predicted_class': predicted_class}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
-    app.run()
+    app.run(debug=True)

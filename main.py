@@ -7,7 +7,6 @@ import cv2
 from ultralytics import YOLO
 from PIL import Image, ImageDraw
 from flask import Flask, request, jsonify
-from werkzeug.utils import secure_filename
 
 app = Flask(__name__)
 app.config['API_KEY'] = 'oEfC3PglPKoCg1jDa833awsnTLoCxWSjbumTypmSEbNgWAincCp00DkcFEw45JznC6Cou73GrU07VieU01ktlsckPyqlWoSU75Bf'

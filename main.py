@@ -1,4 +1,5 @@
 import base64
+import io
 import numpy as np
 import math
 
@@ -165,6 +166,10 @@ def predict():
         image_np = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
                 
         detected_images = objectDetection(image_np)
+        
+        if len(detected_images) == 0:
+            return jsonify({'error': 'Tidak ada fundus yang terdeteksi'}), 200
+        
         input_image = detected_images[0]
         input_image = Image.fromarray(cv2.cvtColor(input_image, cv2.COLOR_BGR2RGB))
         output_image = mask_ellipse(input_image)
@@ -172,8 +177,12 @@ def predict():
 
         predicted_class = ConvolutionalNN(output_image)
         print(predicted_class)
+        
+        # Convert output_image to base64
+        _, buffer = cv2.imencode('.jpg', output_image)
+        output_image_base64 = base64.b64encode(buffer).decode('utf-8')
 
-        return jsonify({'predicted_class': predicted_class}), 200
+        return jsonify({'predicted_class': predicted_class, "cropped_image": output_image_base64}), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 

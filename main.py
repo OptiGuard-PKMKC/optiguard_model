@@ -15,18 +15,15 @@ app.config['API_KEY'] = 'oEfC3PglPKoCg1jDa833awsnTLoCxWSjbumTypmSEbNgWAincCp00Dk
 class_names = ['cataract', 'diabetic_retinopathy', 'glaucoma', 'normal']
 
 #Load Model
-object_detection = YOLO('model/ImageDetection2.pt')
+detection_model_path_1 = 'model/ImageDetection1.pt'
+detection_model_path_2 = 'model/ImageDetection2.pt'
 model_path = 'model/optiguard_model_v1.h5'
 CNN = tf.keras.models.load_model(model_path)
 
 
-@app.route('/')
-def index():
-    return jsonify({'message': 'Hello World!'})
-
 #OBJECT DETECTION
-def objectDetection(image):
-    detector = ObjectDetection()
+def objectDetection(image, model_path):
+    detector = ObjectDetection(model_path)
     detector.set_capture(image)
 
     cropped_images = []
@@ -42,19 +39,15 @@ def objectDetection(image):
             cropped_img = detector.crop_image(image, x1, y1, x2, y2)
             cropped_images.append(cropped_img)
 
-            # cv2_imshow(cropped_img)
-
-        # img_with_boxes = detector.plot_boxes(results, img)
-        # cv2_imshow(img_with_boxes)
-
-    # cv2.destroyAllWindows()
     return cropped_images
 
+
 class ObjectDetection:
-    def __init__(self):
+    def __init__(self, model_path):
         self.capture = None
         self.model = None
         self.CLASS_NAMES_DICT = None
+        self.model_path = model_path
 
     def set_capture(self, capture):
         self.capture = capture
@@ -62,7 +55,7 @@ class ObjectDetection:
         self.CLASS_NAMES_DICT = self.model.names
 
     def load_model(self):
-        model = object_detection
+        model = YOLO(self.model_path)
         return model
 
     def predict(self, img):
@@ -145,17 +138,25 @@ def ConvolutionalNN(image):
 
     return predicted_class
   
+  
+
+# ROUTES
+@app.route('/')
+def index():
+    return jsonify({'message': 'Hello World!'})
+
+  
 @app.route('/predict', methods=['POST'])
 def predict():
     # Check for api key
     api_key = request.headers.get('x-api-key')
     if api_key != app.config['API_KEY']:
-        return jsonify({'error': 'API Key tidak valid'}), 401
+        return jsonify({'success': False, 'error': 'API Key tidak valid'}), 401
     
     # Parse JSON request body
     data = request.get_json()
     if 'fundus_image' not in data:
-        return jsonify({'error': 'Fundus image tidak ditemukan'}), 400
+        return jsonify({'success': False, 'error': 'Fundus image tidak ditemukan'}), 400
 
     fundus_image = data['fundus_image']
     
@@ -164,13 +165,24 @@ def predict():
         image_bytes = base64.b64decode(fundus_image)
         np_arr = np.frombuffer(image_bytes, np.uint8)
         image_np = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
-                
-        detected_images = objectDetection(image_np)
+
+        height, width, _ = image_np.shape
+        print(f"Width: {width}, Height: {height}")
         
-        if len(detected_images) == 0:
-            return jsonify({'error': 'Tidak ada fundus yang terdeteksi'}), 200
+        if (height/width) > 1.5 or (width/height) > 1.5:    
+            detected_image_1 = objectDetection(image_np, detection_model_path_1)
+            if len(detected_image_1) == 0:
+                print('Object detection 1 failed')
+                return jsonify({'success': True, 'message': 'Tidak ada fundus yang terdeteksi'}), 200
+            
+            image_np = detected_image_1[0]
         
-        input_image = detected_images[0]
+        detected_image_2 = objectDetection(image_np, detection_model_path_2)
+        if len(detected_image_2) == 0:
+            print('Object detection 2 failed')
+            return jsonify({'success': True, 'message': 'Tidak ada fundus yang terdeteksi'}), 200
+        
+        input_image = detected_image_2[0]
         input_image = Image.fromarray(cv2.cvtColor(input_image, cv2.COLOR_BGR2RGB))
         output_image = mask_ellipse(input_image)
         output_image = cv2.cvtColor(np.array(output_image), cv2.COLOR_RGB2BGR)
@@ -182,9 +194,16 @@ def predict():
         _, buffer = cv2.imencode('.jpg', output_image)
         output_image_base64 = base64.b64encode(buffer).decode('utf-8')
 
-        return jsonify({'predicted_class': predicted_class, "cropped_image": output_image_base64}), 200
+        return jsonify({
+            'success': True,
+            'data': {
+                'predicted_class': predicted_class, 
+                "cropped_image": output_image_base64
+            }
+        }), 200
+        
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 if __name__ == '__main__':
     app.run(debug=True)
